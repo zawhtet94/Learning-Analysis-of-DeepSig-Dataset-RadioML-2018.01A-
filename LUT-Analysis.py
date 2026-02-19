@@ -1,3 +1,7 @@
+# Generated from: LUT Analysis.ipynb
+# Converted at: 2026-02-19T03:51:35.410Z
+# Next step (optional): refactor into modules & generate tests with RunCell
+# Quick start: pip install runcell
 
 # =========================================================
 # TELECOM FULL ANALYTICS PIPELINE — PRINT AS YOU GO VERSION
@@ -36,6 +40,20 @@ with h5py.File(FILE_PATH,'r') as f:
 print("Loaded:",X.shape,y.shape,snr.shape)
 
 # =========================================================
+#  VISUAL PROOF
+# =========================================================
+
+high_snr_idx = np.where(snr >= 20)[0][0]
+low_snr_idx = np.where(snr <= 0)[0][0]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+ax1.scatter(X[high_snr_idx,:,0], X[high_snr_idx,:,1], s=2, color='green', alpha=0.4)
+ax1.set_title(f"Clean (LUT-Safe) | SNR: {snr[high_snr_idx]}")
+ax2.scatter(X[low_snr_idx,:,0], X[low_snr_idx,:,1], s=2, color='red', alpha=0.4)
+ax2.set_title(f"Noisy (Needs Non-LUT) | SNR: {snr[low_snr_idx]}")
+plt.show()
+
+
 # SIGNAL METRICS
 # =========================================================
 
@@ -481,6 +499,77 @@ df["AI_HealthScore"] = (
 )
 
 print("\nAvg AI Health Score:", df["AI_HealthScore"].mean())
+
+import numpy as np
+import pandas as pd
+
+# =========================================================
+# 1. SIGNAL STABILITY & INTERFERENCE
+# =========================================================
+
+# Calculating Signal Stability Index
+# Higher stability indicates lower phase jitter
+# Using the existing PhaseVar (phase_var) from your DataFrame
+df["Stability"] = 1 / (df["PhaseVar"] + 1e-6)
+
+# =========================================================
+# 2. UPDATED NETWORK HEALTH SCORE
+# =========================================================
+
+# Normalizing metrics to create a weighted health score (0-100)
+# Weighting: 40% SINR, 30% Stability, 30% Bit Error Rate (BER)
+df["HealthScore"] = (
+    (df["SINR"] / df["SINR"].max()) * 0.4 +
+    (df["Stability"] / df["Stability"].max()) * 0.3 +
+    (1 - df["BER"]) * 0.3
+) * 100
+
+# =========================================================
+# 3. ADAPTIVE MODULATION ESTIMATION (SON Engine)
+# =========================================================
+
+def modulation_selector(snr_val):
+    """
+    Tiered selector based on Signal-to-Noise Ratio (SNR) 
+    to determine optimal modulation schemes for 5G/LTE environments.
+    """
+    # Tier 0-2: Basic Connectivity (Robust but slow)
+    if snr_val < 5:
+        return "BPSK"           # 1 bit/symbol - Survival mode
+    elif snr_val < 8:
+        return "QPSK"           # 2 bits/symbol - Standard Control
+    elif snr_val < 12:
+        return "8PSK"           # 3 bits/symbol - High-speed Phase Shift
+    
+    # Tier 3-5: Mid-Range (Mobile Data)
+    elif snr_val < 15:
+        return "16QAM"          # 4 bits/symbol - Standard LTE/4G
+    elif snr_val < 18:
+        return "GMSK"           # Constant Envelope (IoT/2G Standard)
+    elif snr_val < 22:
+        return "32QAM"          # 5 bits/symbol - Specialized Tier
+    
+    # Tier 6-8: High Capacity (Ultra-Fast)
+    elif snr_val < 25:
+        return "64QAM"          # 6 bits/symbol - 5G/High-speed Wi-Fi
+    elif snr_val < 30:
+        return "AM-SSB/DSB"     # Analog-style specialized patterns
+    else:
+        return "128/256QAM"     # Peak capacity tiers
+
+# Applying the selector to generate predicted modulation tiers
+df["Predicted_Modulation"] = df["SNR"].apply(modulation_selector)
+
+# =========================================================
+# 4. FINAL TELECOM DASHBOARD SUMMARY
+# =========================================================
+
+print("\n===== Updated Network Diagnostic Summary =====")
+print(df[["Mod", "SINR", "BER", "Stability", "HealthScore", "Predicted_Modulation"]].describe())
+
+# Displaying top risk samples (Lowest Health)
+print("\n===== Top 5 Critical Priority Samples =====")
+print(df.sort_values("HealthScore").head(5))
 
 # =========================================================
 # SON (SELF ORGANIZING NETWORK) SYSTEM - FIXED
